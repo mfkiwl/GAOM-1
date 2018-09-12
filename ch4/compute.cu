@@ -1,16 +1,22 @@
 #include "common.h"
 #include "precomputation.cuh"
 #include "icgn.cuh"
+#include "FFTW_cc.cuh"
 #include "TW_MemManager.h"
 #include <omp.h>
+#include <fstream>
+#include <iostream>
+#include<opencv2\opencv.hpp>
 
+using namespace std;
+using namespace cv;
 
 void icgn_algorithm(float ** m_dImg1, float ** m_dImg2,
 	ICGN_d_Handle &m_Handle, const int &m_iMaxIteration, const float &m_dNormDeltaP,
 	//return value
 	int ***&m_dPXY,	float ***&m_dP,
 	int **&m_iIterationNum, int &m_iIteration,
-	Timer& m_Time)
+	Timer& m_Time,int m_iFFTSubW,int m_iFFTSubH)
 {
 	double t_whole = omp_get_wtime();//omp_get_wtime用于定位时间 单位秒s
 
@@ -59,41 +65,60 @@ void icgn_algorithm(float ** m_dImg1, float ** m_dImg2,
 
 	float* w_d_dP = m_Handle.m_d_dP;
 	int *m_d_iIterationNum = m_Handle.m_d_iIterationNum;
-	cudaEvent_t start, cp1, pre, hessian, icgn, cp2;//创建时间节点
-	cudaEventCreate(&start);
-	cudaEventCreate(&cp1);
-	cudaEventCreate(&pre);
-	cudaEventCreate(&hessian);
-	cudaEventCreate(&icgn);
-	cudaEventCreate(&cp2);
+//	cudaEvent_t start, cp1, pre, fft_cc, hessian, icgn, cp2;//创建时间节点
+//	cudaEventCreate(&start);
+//	cudaEventCreate(&cp1);
+//	cudaEventCreate(&pre);
+	//cudaEventCreate(&fft_cc);
+//	cudaEventCreate(&hessian);
+//	cudaEventCreate(&icgn);
+//	cudaEventCreate(&cp2);
 	
 	// Copy the images to device
-	cudaEventRecord(start);
+//	cudaEventRecord(start,0);
+	double time0 = getTickCount();
 	cudaMemcpy(m_d_dImg1, m_dImg1[0], sizeof(float)*m_iImgWidth*m_iImgHeight, cudaMemcpyHostToDevice);
 	cudaMemcpy(m_d_dImg2, m_dImg2[0], sizeof(float)*m_iImgWidth*m_iImgHeight, cudaMemcpyHostToDevice);
-	cudaEventRecord(cp1);
 
+//	cudaEventRecord(cp1,0);
+	//cudaEventSynchronize(cp1);
+	double time1 = getTickCount();
 	// Precomputation starts
 	cu_precomputation(m_d_dImg1, m_d_dImg2,
 		m_Handle);
-	cudaEventRecord(pre);
-
+	//cudaEventRecord(pre,0);
+	double time2 = getTickCount();
+	//FFT_CC变换
+	/*
+	FFTW_cc
+	(m_Handle.m_iNumberX, m_Handle.m_iNumberY, m_iFFTSubW, m_iFFTSubH,
+		m_Handle.m_d_dR, m_Handle.m_d_dT, m_Handle.m_d_dPXY,
+		m_Handle.m_iHeight, m_Handle.m_iWidth,
+		m_Handle.m_d_iU, m_Handle.m_d_iV
+		);
+		*/
+	double timefftcc = getTickCount();
+	//cudaEventRecord(fft_cc);
 	// ICGN
 	all_gpu_cu_prepare_Hessian_all_iteration(m_Handle);
 
-	cudaEventRecord(hessian);
+//	cudaEventRecord(hessian,0);
+	double time3 = getTickCount();
 
 	all_gpu_main_icgn_process_all_iteration(m_Handle,
 		m_iMaxIteration,
 		m_dNormDeltaP);
-	cudaEventRecord(icgn);
+//	cudaEventRecord(icgn,0);
+	double time4 = getTickCount();
 
 	cudaMemcpy(m_iIterationNum[0], m_d_iIterationNum, sizeof(int)*m_iNumSize, cudaMemcpyDeviceToHost);
 	cudaMemcpy(m_dP[0][0], w_d_dP, sizeof(float)*m_iNumSize * 6, cudaMemcpyDeviceToHost);
 	m_iIteration = 0;
 	cudaMemcpy(m_dPXY[0][0], m_Handle.m_d_dPXY, sizeof(int)*m_iNumSize * 2, cudaMemcpyDeviceToHost);
-	cudaEventRecord(cp2);
+
+//	cudaEventRecord(cp2,0);
 	cudaDeviceSynchronize();
+	double time5 = getTickCount();
 	for (int i = 0; i < m_iNumberY; i++)
 	{
 		for (int j = 0; j < m_iNumberX; j++)
@@ -101,19 +126,24 @@ void icgn_algorithm(float ** m_dImg1, float ** m_dImg2,
 			m_iIteration += m_iIterationNum[i][j];
 		}
 	}
-	float t_cp1, t_pre, t_hessian, t_icgn, t_cp2;
-
-	cudaEventElapsedTime(&t_cp1, start, cp1);
-	cudaEventElapsedTime(&t_pre, cp1, pre);
-	cudaEventElapsedTime(&t_hessian, pre, hessian );
-	cudaEventElapsedTime(&t_icgn, hessian, icgn);
-	cudaEventElapsedTime(&t_cp2, icgn, cp2);
-
+//	float t_cp1, t_pre, t_hessian, t_icgn, t_cp2, t_fft_cc;
+//	double time = (time1 - time0)/ getTickFrequency();
+//	double timeall = (time5 - time0)/getTickFrequency();
+//	cudaEventElapsedTime(&t_cp1, start, cp1);
+//	cudaEventElapsedTime(&t_pre, cp1, pre);
+	//cudaEventElapsedTime(&t_fft_cc, pre, fft_cc);
+//	cudaEventElapsedTime(&t_hessian, pre, hessian );
+//	cudaEventElapsedTime(&t_icgn, hessian, icgn);
+//	cudaEventElapsedTime(&t_cp2, icgn, cp2);
+//	cout << "t_cp1:" << t_cp1 << endl;
+//	cout << "copy:" << time << endl;
+//	cout  << timeall << endl;
 	t_whole = (omp_get_wtime() - t_whole) * 1000;
 	m_Time.m_dConsumedTime = t_whole;
-	m_Time.m_dMemCpy = t_cp1 + t_cp2;
-	m_Time.m_dPrecomputeTime = t_pre + t_hessian;
-	m_Time.m_dICGNTime = t_icgn;
+	m_Time.m_dMemCpy = (time1 - time0) / getTickFrequency();
+	m_Time.m_dPrecomputeTime = (time2 - time1)+(time3-timefftcc) / getTickFrequency();
+	m_Time.m_dICGNTime = (time4 - time3) / getTickFrequency();
+	m_Time.m_dFFTCCTime = (timefftcc - time2) / getTickFrequency();
 }
 
 

@@ -55,11 +55,11 @@ struct Timer
 	double m_dHosMemAlloc;
 	double m_dDevMemFree;
 	double m_dHosMemFree;
-
 	double m_dMemCpy;
 
 	double m_dConsumedTime;
 	double m_dPrecomputeTime;
+	double m_dFFTCCTime;
 	double m_dICGNTime;
 };
 
@@ -68,7 +68,7 @@ void icgn_algorithm(float ** m_dImg1, float ** m_dImg2,
 	//return value
 	int ***&m_dPXY, float ***&m_dP,
 	int **&m_iIterationNum, int &m_iIteration,
-	Timer& m_Time);
+	Timer& m_Time, int m_iFFTSubW,int m_iFFTSubH );
 
 void icgn_prepare(ICGN_d_Handle &m_Handle, int ***&m_dPXY, float ***&m_dP, int ** &m_iIterationNum);
 

@@ -26,6 +26,7 @@ SOFTWARE.
 #include "icgn.cuh"
 #include "common.h"
 #include "reducer.cuh"
+using namespace std;
 
 __global__ void get_AveR_kernel_all_iteration(float*dR, int *dPXY,
 	int iSubsetH, int iSubsetW,	int iSubsetX, int iSubsetY,	int iHeight, int iWidth,
@@ -623,6 +624,9 @@ void all_gpu_main_icgn_process_all_iteration(ICGN_d_Handle &m_Handle,
 	const int &m_iMaxIteration,
 	const float &m_dNormDeltaP)
 {
+	//checkCudaErrors(cudaMemcpy(displacement_x, d_displacement_x, (H * W / (size_of_subset* size_of_subset)) * sizeof(double), cudaMemcpyDeviceToHost));
+	//cout << "PX" <<m_d_dPXY[0] << "PY" <<m_d_dPXY[1];
+	//cout << "dT"<< m_d_dT[0]<<"InvH"<< m_d_dInvHessian[0]<<"AvR"<<m_d_dSubsetAveR[0];
 	icgn_kernel_all_iteration <<<m_Handle.m_iNumberX*m_Handle.m_iNumberY, BLOCK_SIZE_64 >> >(
 		m_Handle.m_d_iU, m_Handle.m_d_iV,
 		m_Handle.m_d_dPXY,

@@ -3,7 +3,7 @@
 
 #include <cufft.h>
 #include "fftw3.h"
-#include <cufftw.h>
+
 #include<device_functions.h>
 #include <cstdlib>
 #include <cstdio>
@@ -21,140 +21,74 @@
 
 using namespace std;
 using namespace cv;
-/*
-const int BUFFER_SIZE = 1024;
-char buffer[BUFFER_SIZE];
-int size_of_subset = 32;//子区为32*32
-*/
-struct abc{
-	int x;
-	int y;
-};
 
-//int search_radius = 10;//搜索半径为10个像素
-/*
-void test()
+__global__ void conjugate(cuFloatComplex *comp)
 {
-	Engine* ep;
-	mxArray *x1 = NULL;
-	mxArray *y1 = NULL;
-	if ((ep = engOpen("")) == NULL)
-	{
-		printf("Engine Fail");
-	}
-	engOutputBuffer(ep, buffer, BUFFER_SIZE);
-	printf("Init Success");
+	int tid = threadIdx.x + threadIdx.y*blockDim.x;
+	int bid = blockIdx.x;
+	int dim = blockDim.x*blockDim.y;
+	comp[bid*dim + tid].y = -comp[bid*dim + tid].y;
 
-	float x[5] = { 1.0, 2.5, 3.7, 4.4, 5.1 };
-	float y[5] = { 3.3, 4.7, 9.6, 15.6, 21.3 };
-	x1 = mxCreatefloatMatrix(1, 5, mxREAL);
-	y1 = mxCreatefloatMatrix(1, 5, mxREAL);
-
-	memcpy((void *)mxGetPr(x1), (void *)x, sizeof(x));
-	memcpy((void *)mxGetPr(y1), (void *)y, sizeof(y));
-
-	engPutVariable(ep, "x", x1);
-	engPutVariable(ep, "y", y1);
-
-	engEvalString(ep, "plot(x,y)");
-	getchar();
-	engClose(ep);
 }
-*/
-/*
-void huitu(float *displacement_x, float *displacement_y)
+
+
+
+__global__ void multiplication(cuFloatComplex *comp1, cuFloatComplex *comp2)
 {
-	Engine* ep;
-	mxArray *x1 = NULL;
-	mxArray *y1 = NULL;
-	// mxArray *x = NULL;
-	// mxArray *y = NULL;
-	// float *a = (float*)malloc(256 * sizeof(float *));
-	// float *b = (float*)malloc(256 * sizeof(float *));
-
-	if ((ep = engOpen("")) == NULL)
-	{
-		printf("Engine Fail");
-	}
-	engOutputBuffer(ep, buffer, BUFFER_SIZE);
-	printf("Init Success");
-
-	for (int i = 0; i < 256; i++)
-	{
-	a[i] = i;
-	b[i] = i;
-	}
-	
-	// float x[10] = { 0, 3, 6, 8, 9, 3, 5, 4, 1, 7 };
-	// float y[10] = { 2, 5, 7, 9, 3, 6, 4, 8, 1, 4 };
-
-	x1 = mxCreatefloatMatrix(15, 15, mxREAL);
-	y1 = mxCreatefloatMatrix(15, 15, mxREAL);
-
-	//x = mxCreatefloatMatrix(1, 256, mxREAL);
-	// y = mxCreatefloatMatrix(1, 256, mxREAL);
-	// memcpy((void *)mxGetPr(x1), (void *)x, sizeof(x));
-	// memcpy((void *)mxGetPr(y1), (void *)y, sizeof(y));
-	memcpy((void *)mxGetPr(x1), (void *)displacement_x, 225 * sizeof(float));
-	memcpy((void *)mxGetPr(y1), (void *)displacement_y, 225 * sizeof(float));
-	// memcpy((void *)mxGetPr(x), (void *)a, sizeof(a));
-	// memcpy((void *)mxGetPr(y), (void *)b, sizeof(b));
-
-	//engPutVariable(ep, "u", x1);
-	// engPutVariable(ep, "v", y1);
-	engPutVariable(ep, "u", x1);
-	engPutVariable(ep, "v", y1);
-
-	engEvalString(ep, "[x,y]=meshgrid(16:32:464,16:32:464);");
-	//engEvalString(ep, "y=0:1:500;");
-
-	engEvalString(ep, "quiver(x,y,v,u,1)");
-	getchar();
-	engClose(ep);
+	int tid = threadIdx.x + threadIdx.y*blockDim.x;
+	int bid = blockIdx.x;
+	int dim = blockDim.x*blockDim.y;
+	float t;
+	t = comp1[bid*dim + tid].x;
+	comp1[bid*dim + tid].x = comp1[bid*dim + tid].x * comp2[bid*dim + tid].x - comp1[bid*dim + tid].y * comp2[bid*dim + tid].y;
+	comp1[bid*dim + tid].y = t * comp2[bid*dim + tid].y + comp1[bid*dim + tid].y * comp2[bid*dim + tid].x;
 }
-*/
 
-
-
-__global__ void latched_position(float *Mats, float *displacement_x, float *displacement_y, int i)
+__global__ void latched_position(cufftReal *Mats, int *displacement_x, int *displacement_y, int subsetsize)
 {
 	int x = threadIdx.x;
 	int y = threadIdx.y;
-	//float* mat_of_subset;
-	//mat_of_subset = Mat[i + j*gridDim.x];
-	__shared__ float max[32 * 32];
-	__shared__ int a[32 * 32], b[32 * 32];
-	max[y + blockDim.y*x] = Mats[y + blockDim.y*x];
-	max[y + blockDim.y*x + blockDim.x*blockDim.y] = Mats[y + blockDim.y*x + blockDim.x*blockDim.y];
-	int k = 2 * blockDim.x*blockDim.y / 2;
-	a[y + blockDim.y*x] = x;
-	a[y + blockDim.y*x + blockDim.x*blockDim.y] = x + blockDim.x;
-	b[y + blockDim.y*x] = y;
-	b[y + blockDim.y*x + blockDim.x*blockDim.y] = y;
+	int bid = blockIdx.x;
+	int dim = blockDim.x*blockDim.y;
+	__shared__ float max[64 * 64];
+	__shared__ int a[64 * 64], b[64 * 64];
+	if (x + dim*y == 0)
+	{
+		for (int j = 0;j < 64 * 64;j++)
+		{
+			max[j] = 0;
+			a[j] = 0;
+			b[j] = 0;
+		}
+	}
+	max[x + blockDim.x*y] = Mats[bid*dim + x + blockDim.x*y] / subsetsize;
+	int k = 64 * 64 / 2;
+	a[x + blockDim.x*y] = x;
+	b[x + blockDim.x*y] = y;
 	while (k != 0)
 	{
-		if (max[y + blockDim.y*x] < max[y + blockDim.y*x + k])
+		if (max[x + blockDim.x*y] < max[x + blockDim.x*y + k])
 		{
-			max[y + blockDim.y*x] = max[y + blockDim.y*x + k];
-			a[y + blockDim.y*x] = a[y + blockDim.y*x + k];
-			b[y + blockDim.y*x] = b[y + blockDim.y*x + k];
+			max[x + blockDim.x*y] = max[x + blockDim.x*y + k];
+			a[x + blockDim.x*y] = a[x + blockDim.x*y + k];
+			b[x + blockDim.x*y] = b[x + blockDim.x*y + k];
 		}
 		__syncthreads();
 		k = k / 2;
 
 	}
-	if (y + blockDim.y*x == i)
+	if (x + blockDim.x*y == 0)
 	{
 		if (max[0] < 0.03)
 		{
-			displacement_x[y + blockDim.y*x] = 0;
-			displacement_y[y + blockDim.y*x] = 0;
+			displacement_x[bid] = 0;
+			displacement_y[bid] = 0;
 		}
 		else
 		{
 
-			displacement_x[y + blockDim.y*x] = a[0];
-			displacement_y[y + blockDim.y*x] = b[0];
+			displacement_x[bid] = a[0];
+			displacement_y[bid] = b[0];
 		}
 	}
 }
@@ -162,38 +96,7 @@ __global__ void latched_position(float *Mats, float *displacement_x, float *disp
 
 
 
-inline int iAlignUp(int a, int b)
-{
-	return (a % b != 0) ? (a - a % b + b) : a;
-}
 
-inline __device__ void mulAndScale(cufftfloatComplex &a, const cufftfloatComplex &b, const float &c)//一复数矩阵共轭点乘另一复数矩阵
-{
-	cufftfloatComplex t = { c *(a.x * b.x + a.y * b.y), c *(-a.y * b.x + a.x * b.y) };
-	a = t;
-}
-
-__global__ void conjugate(cufloatComplex *comp)
-{
-	int tid = threadIdx.y + threadIdx.x*blockDim.y;
-	comp[tid].y = -comp[tid].y;
-
-}
-
-void H_conjugate(fftw_complex *comp，int )
-{
-
-}
-
-
-__global__ void multiplication(cufloatComplex *comp1, cufloatComplex *comp2)
-{
-	int tid = threadIdx.y + threadIdx.x*blockDim.y;
-	float t;
-	t = comp1[tid].x;
-	comp1[tid].x = comp1[tid].x * comp2[tid].x - comp1[tid].y * comp2[tid].y;
-	comp1[tid].y = t * comp2[tid].y + comp1[tid].y * comp2[tid].x;
-}
 __global__ void get_FFTAveR_kernel_all_iteration(float*dR, int *dPXY,
 	int iSubsetH, int iSubsetW, int iHeight, int iWidth,
 	float *whole_dSubSet, float *whole_dSubsetAve)
@@ -206,15 +109,16 @@ __global__ void get_FFTAveR_kernel_all_iteration(float*dR, int *dPXY,
 	int dim = blockDim.x;
 	int bid = blockIdx.x;
 	int size = iSubsetH*iSubsetW;
+	float avg_sqrt_sum;
 	float avg;// = 0;
 	float mySum = 0;
 	float tempt;
 	float *dSubSet = whole_dSubSet + size*bid;//子区大小为size,单个block处理单个子区，子区数目对应POI
-	float *dSubsetAve = whole_dSubsetAve + (size + 1)*bid;//为何加1???因为第一个数据为均方差，其余方为各点灰度值减去均值
+	float *dSubsetAve = whole_dSubsetAve + (size )*bid;//为何加1???因为第一个数据为均方差，其余方为各点灰度值减去均值
 
 	int t_dpxy0 = dPXY[bid * 2];//t_dpxy0,t_dpxy1分别对应POI的x,y坐标
 	int t_dpxy1 = dPXY[bid * 2 + 1];
-	int t_iidx = iWidth*(int)(t_dpxy0 - iSubsetY) + (int)t_dpxy1 - iSubsetX;//少个l*iWidth（POI子区左上角顶点在大图像中的索引）
+	int t_iidx = iWidth*(int)(t_dpxy0 - iSubsetH/2+1) + (int)t_dpxy1 - iSubsetH/2+1;//少个l*iWidth（POI子区左上角顶点在大图像中的索引）
 	float* p_dR = dR + t_iidx;//dR为图像，此为POI子区左上角顶点在大图像中的指针索引
 
 	for (int id = tid; id<size; id += dim)
@@ -235,18 +139,18 @@ __global__ void get_FFTAveR_kernel_all_iteration(float*dR, int *dPXY,
 	{
 		tempt = dSubSet[id] - avg;
 		mySum += tempt*tempt;
-		dSubsetAve[id + 1] = tempt;
+		dSubsetAve[id] = tempt;
 	}
 	__syncthreads();
 	sumReduceBlock<BLOCK_SIZE_128, float>(sm, mySum, tid);
 	__syncthreads();
 	if (tid == 0)
 	{
-		dSubsetAve[0] = sqrt(sm[tid]);
+		avg_sqrt_sum = sqrt(sm[tid]);
 	}
 	for (int id = tid; id<size; id += dim)
 	{
-		dSubsetAve[id + 1] = dSubsetAve[id + 1]/ dSubsetAve[0];
+		dSubsetAve[id] = dSubsetAve[id]/ avg_sqrt_sum;
 	}
 
 }
@@ -254,14 +158,21 @@ __global__ void get_FFTAveR_kernel_all_iteration(float*dR, int *dPXY,
 
 void FFTW_cc
 (int m_iNumberX,int m_iNumberY,int m_iFFTSubW,int m_iFFTSubH,
-	float **dR,float **m_dImg1,int PXY,
-	int iHeight,int iWidth,
-	float*subsetR, float*subsetT,float* subset_aveR,float* subset_aveT)
+	float *dR,float *dT,int *dPXY,
+	int iHeight,int iWidth,	int *d_iU,int *d_iV)
 {
 	float *H_subsetR, *H_subsetT;
-	float *H_subset_aveR，H_subset_aveT;
+	float *H_subset_aveR,H_subset_aveT;
 	int iNumbersize = m_iNumberX* m_iNumberY;
-	int subsetsize = m_iFFTSubW*m_iFFTSubW;
+	int subsetsize = m_iFFTSubW*m_iFFTSubH;
+	float*subsetR;
+	float*subsetT;
+	float* subset_aveR;
+	float* subset_aveT;
+	checkCudaErrors(cudaMalloc((void **)&subsetR, iNumbersize *subsetsize * sizeof(float)));
+	checkCudaErrors(cudaMalloc((void **)&subsetT, iNumbersize *subsetsize * sizeof(float)));
+	checkCudaErrors(cudaMalloc((void **)&subset_aveR, iNumbersize *(subsetsize) * sizeof(float)));
+	checkCudaErrors(cudaMalloc((void **)&subset_aveT, iNumbersize *(subsetsize) * sizeof(float)));
 	get_FFTAveR_kernel_all_iteration << <iNumbersize,BLOCK_SIZE_128 >> > (dR, dPXY,
 		m_iFFTSubW, m_iFFTSubW, iHeight, iWidth,
 		subsetR, subset_aveR);
@@ -269,6 +180,51 @@ void FFTW_cc
 	get_FFTAveR_kernel_all_iteration << <iNumbersize, BLOCK_SIZE_128 >> > (dT, dPXY,
 		m_iFFTSubW, m_iFFTSubW, iHeight, iWidth,
 		subsetT, subset_aveT);
+
+	cufftComplex *CU_FT_R, *CU_FT_T;
+	cufftReal * CuFFT;
+	//cufftReal *test_in;
+	//checkCudaErrors(cudaMalloc((void **)&test_in, m_iFFTSubW *m_iFFTSubH * sizeof(cufftReal)));
+	//cuFloatComplex *test;
+	//checkCudaErrors(cudaMalloc((void **)&test, m_iFFTSubW *(m_iFFTSubH / 2 + 1) * sizeof(cuFloatComplex)));
+	checkCudaErrors(cudaMalloc((void **)&CU_FT_R, iNumbersize* m_iFFTSubW *(m_iFFTSubH / 2 + 1) * sizeof(cuFloatComplex)));
+	checkCudaErrors(cudaMalloc((void **)&CU_FT_T, iNumbersize*  m_iFFTSubW *(m_iFFTSubH / 2 + 1) * sizeof(cuFloatComplex)));
+	checkCudaErrors(cudaMalloc((void **)&CuFFT, iNumbersize*m_iFFTSubW *m_iFFTSubH * sizeof(cufftReal)));
+
+	cufftHandle plan1, plan2;
+	checkCudaErrors(cufftPlan2d(&plan1, m_iFFTSubW, m_iFFTSubH, CUFFT_R2C));
+	checkCudaErrors(cufftPlan2d(&plan2, m_iFFTSubW, m_iFFTSubH, CUFFT_C2R));
+	//checkCudaErrors(cufftExecR2C(plan1, (cufftReal *)(test_in), (cuFloatComplex *)(test)));
+	dim3 block(iNumbersize);
+	dim3 threadnew(m_iFFTSubH, m_iFFTSubW / 2 + 1);
+	dim3 thread(m_iFFTSubH, m_iFFTSubW);
+	for (int i = 0;i < iNumbersize;i++)
+	{
+		//checkCudaErrors(cufftExecR2C(plan1, (cufftReal *)test_in, (cuFloatComplex *)(CU_FT_R + i* m_iFFTSubW *(m_iFFTSubH / 2 + 1))));
+		checkCudaErrors(cufftExecR2C(plan1, (cufftReal *)(subset_aveR + i * (subsetsize)), (cufftComplex *)(CU_FT_R + i* m_iFFTSubW *(m_iFFTSubH / 2 + 1))));
+		checkCudaErrors(cufftExecR2C(plan1, (cufftReal *)(subset_aveT + i * (subsetsize)), (cufftComplex *)(CU_FT_T + i* m_iFFTSubW *(m_iFFTSubH / 2 + 1))));
+	}
+	conjugate << <block, threadnew >> > (CU_FT_R);
+	multiplication << <block, threadnew >> > (CU_FT_R, CU_FT_T);
+
+	for (int j = 0;j < iNumbersize;j++)
+	{
+		checkCudaErrors(cufftExecC2R(plan2, (cuFloatComplex *)CU_FT_R, (cufftReal *)(CuFFT + subsetsize)));
+	}
+
+
+	latched_position << <block, thread >> > (CuFFT, d_iU, d_iV, subsetsize);
+/*
+	checkCudaErrors(cudaFree(subsetR));
+	checkCudaErrors(cudaFree(subsetT));
+	checkCudaErrors(cudaFree(subset_aveR));
+	checkCudaErrors(cudaFree(subset_aveT));
+	checkCudaErrors(cudaFree(CU_FT_R));
+	checkCudaErrors(cudaFree(CU_FT_T));
+	checkCudaErrors(cudaFree(CuFFT));
+*/
+
+	/*
 	checkCudaErrors(cudaMemcpy(H_subset_aveR, subset_aveR, iNumbersize *(subsetsize+1)* sizeof(float), cudaMemcpyDeviceToHost));
 	checkCudaErrors(cudaMemcpy(H_subset_aveT, subset_aveT, iNumbersize *(subsetsize + 1) * sizeof(float), cudaMemcpyDeviceToHost));
 
@@ -289,4 +245,5 @@ void FFTW_cc
 
 		}
 	}
+	*/
 }

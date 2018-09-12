@@ -65,7 +65,7 @@ void testICGN(cv::Mat& imgR, cv::Mat& imgT)
 	//将图像数据转化为float型储存到 m_dImg1, m_dImg2
 	MatToFloat(imgR, m_dImg1);
 	MatToFloat(imgT, m_dImg2);
-
+	printf("%lf", **m_dImg1);
 	int ***m_dPXY;
 	float ***m_dP;
 	int ** m_iIterationNum;
@@ -73,22 +73,11 @@ void testICGN(cv::Mat& imgR, cv::Mat& imgT)
 	ICGN_d_Handle m_Handle;//结构体数据
 	Timer m_Time;
 
-	icgn_gpu_prepare(m_Handle,
-		m_iImgWidth, m_iImgHeight,
-		m_iSubsetX, m_iSubsetY,
-		m_iMarginX, m_iMarginY,
-		m_iGridSpaceX, m_iGridSpaceY,
-		m_Time);//在GPU申请内存
-	icgn_prepare(m_Handle, m_dPXY, m_dP, m_iIterationNum);
-
-	icgn_algorithm(m_dImg1, m_dImg2, m_Handle, m_iMaxIteration, m_dNormDeltaP, m_dPXY, m_dP, m_iIterationNum, m_iIteration, m_Time);
-
-
 	//Define the size of region of interest (ROI)
 	int m_iWidth = m_iImgWidth - 2; // set margin = 1 column
 	int m_iHeight = m_iImgHeight - 2; // set margin = 1 row
 
-    //Define the size of subset window for IC-GN algorithm
+									  //Define the size of subset window for IC-GN algorithm
 	int m_iSubsetW = m_iSubsetX * 2 + 1;
 	int m_iSubsetH = m_iSubsetY * 2 + 1;
 	//Define the size of subset window for FFT-CC algorithm
@@ -98,6 +87,20 @@ void testICGN(cv::Mat& imgR, cv::Mat& imgT)
 	//Estimate the number of points of interest(POIs)
 	int m_iNumberX = int(floor((m_iWidth - m_iSubsetX * 2 - m_iMarginX * 2) / double(m_iGridSpaceX))) + 1;
 	int m_iNumberY = int(floor((m_iHeight - m_iSubsetY * 2 - m_iMarginY * 2) / double(m_iGridSpaceY))) + 1;
+
+	icgn_gpu_prepare(m_Handle,
+		m_iImgWidth, m_iImgHeight,
+		m_iSubsetX, m_iSubsetY,
+		m_iMarginX, m_iMarginY,
+		m_iGridSpaceX, m_iGridSpaceY,
+		m_Time);//在GPU申请内存
+	icgn_prepare(m_Handle, m_dPXY, m_dP, m_iIterationNum);
+
+	icgn_algorithm(m_dImg1, m_dImg2, m_Handle, m_iMaxIteration, m_dNormDeltaP, m_dPXY, m_dP,
+		m_iIterationNum, m_iIteration, m_Time,m_iFFTSubW,m_iFFTSubH);
+
+
+
 	
 	// Output results
 	ofstream oFile;
@@ -133,6 +136,7 @@ void testICGN(cv::Mat& imgR, cv::Mat& imgT)
 	oFile << "Time for device Mem Free: " << m_Time.m_dDevMemFree << " [millisec]" << endl;
 	oFile << "Time comsumed: " << m_Time.m_dConsumedTime << " [millisec]" << endl;
 	oFile << "Time for Pre-computation: " << m_Time.m_dPrecomputeTime << " [millisec]" << endl;
+	oFile << "Time for FFT_CC " << m_Time.m_dFFTCCTime << " [millisec]" << endl;
 	oFile << "Time for all sub-pixel registration: " << m_Time.m_dICGNTime << " [millisec]" << endl;
 	oFile << "Time for sub-pixel registration: " << m_Time.m_dICGNTime / (m_iNumberY*m_iNumberX) << " [millisec]" << " for average iteration steps of " << double(m_iIteration) / (m_iNumberY*m_iNumberX) << endl;
 
@@ -148,6 +152,7 @@ void testICGN(cv::Mat& imgR, cv::Mat& imgT)
 	cout << "Time for device Mem Free: " << m_Time.m_dDevMemFree << " [millisec]" << endl;
 	cout << "Time comsumed: " << m_Time.m_dConsumedTime << " [millisec]" << endl;
 	cout << "Time for Pre-computation: " << m_Time.m_dPrecomputeTime << " [millisec]" << endl;
+	cout << "Time for FFT_CC " << m_Time.m_dFFTCCTime << " [millisec]" << endl;
 	cout << "Time for all sub-pixel registration: " << m_Time.m_dICGNTime << " [millisec]" << endl;
 	cout << "Time for sub-pixel registration: " << m_Time.m_dICGNTime / (m_iNumberY*m_iNumberX) << " [millisec]" << " for average iteration steps of " << double(m_iIteration) / (m_iNumberY*m_iNumberX) << endl;
 	cout << "Results are savec to ICGN_DATA.csv" << endl;
