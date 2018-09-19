@@ -337,7 +337,7 @@ __global__ void get_hessian_kernel_all_iteration(float* dRx, float *dRy, int *dP
 			}
 			if (tid<4)
 			{
-				if (dHessian[iIndOfRowTempt[tid] * 16 + l]<dHessian[iIndOfRowTempt[tid + 4] * 16 + l])
+				if (dHessian[iIndOfRowTempt[tid] * 16 + l]<dHessian[iIndOfRowTempt[tid + 4] * 16 + l])//越界？？？未越界  注意是l而不是1
 					iIndOfRowTempt[tid] = iIndOfRowTempt[tid + 4];
 			}
 			if (tid<2)
@@ -672,7 +672,7 @@ void all_gpu_cu_prepare_Hessian_all_iteration(ICGN_d_Handle &m_Handle)
 		m_Handle.m_iHeight, m_Handle.m_iWidth,
 		m_Handle.m_d_2dRDescent,
 		m_Handle.m_d_dInvHessian
-		);//求逆矩阵
+		);//求Hessian逆矩阵
 
 }
 

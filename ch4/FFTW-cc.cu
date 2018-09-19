@@ -155,6 +155,36 @@ __global__ void get_FFTAveR_kernel_all_iteration(float*dR, int *dPXY,
 
 }
 
+__global__ void chang_coordinate(cufftReal *CUFFT, int iSubsetW,int subsetsize)
+{
+	int tid = threadIdx.x;
+	int dim = blockDim.x;
+	int bid = blockIdx.x;
+	float *subset_CUFFT = CUFFT+subsetsize*bid;
+	float temp;
+	for (int id = tid; id<subsetsize/4; id += dim)
+	{
+		int	l = 2*id / iSubsetW;//子区y方向索引
+		int m = 2* id % iSubsetW;//子区x方向索引
+		int t_sidx = m + l*iSubsetW;//子区各点索引
+		int t_sidx2 = m + iSubsetW / 2 + ( l + iSubsetW / 2) * iSubsetW;
+		temp = *(subset_CUFFT + t_sidx);// dR[int(dPXY[bid * 2] - iSubsetY + l)*iWidth + int(dPXY[bid * 2 + 1] - iSubsetX + m)];
+		*(subset_CUFFT + t_sidx) = *(subset_CUFFT + t_sidx2);
+		*(subset_CUFFT + t_sidx2)=temp;
+	}
+	for (int id = tid; id<subsetsize / 4; id += dim)
+	{
+		int	l = 2 * id / iSubsetW;//子区y方向索引
+		int m = 2 * id % iSubsetW;//子区x方向索引
+		int t_sidx = m + iSubsetW / 2 + l*iSubsetW;//子区各点索引
+		int t_sidx2 = m  + (l + iSubsetW / 2) * iSubsetW;
+		temp = *(subset_CUFFT + t_sidx);// dR[int(dPXY[bid * 2] - iSubsetY + l)*iWidth + int(dPXY[bid * 2 + 1] - iSubsetX + m)];
+		*(subset_CUFFT + t_sidx) = *(subset_CUFFT + t_sidx2);
+		*(subset_CUFFT + t_sidx2) = temp;
+	}
+
+
+}
 
 void FFTW_cc
 (int m_iNumberX,int m_iNumberY,int m_iFFTSubW,int m_iFFTSubH,
@@ -169,17 +199,11 @@ void FFTW_cc
 	float*subsetT;
 	float* subset_aveR;
 	float* subset_aveT;
+	double time0 = getTickCount();
 	checkCudaErrors(cudaMalloc((void **)&subsetR, iNumbersize *subsetsize * sizeof(float)));
 	checkCudaErrors(cudaMalloc((void **)&subsetT, iNumbersize *subsetsize * sizeof(float)));
 	checkCudaErrors(cudaMalloc((void **)&subset_aveR, iNumbersize *(subsetsize) * sizeof(float)));
 	checkCudaErrors(cudaMalloc((void **)&subset_aveT, iNumbersize *(subsetsize) * sizeof(float)));
-	get_FFTAveR_kernel_all_iteration << <iNumbersize,BLOCK_SIZE_128 >> > (dR, dPXY,
-		m_iFFTSubW, m_iFFTSubW, iHeight, iWidth,
-		subsetR, subset_aveR);
-
-	get_FFTAveR_kernel_all_iteration << <iNumbersize, BLOCK_SIZE_128 >> > (dT, dPXY,
-		m_iFFTSubW, m_iFFTSubW, iHeight, iWidth,
-		subsetT, subset_aveT);
 
 	cufftComplex *CU_FT_R, *CU_FT_T;
 	cufftReal * CuFFT;
@@ -191,9 +215,21 @@ void FFTW_cc
 	checkCudaErrors(cudaMalloc((void **)&CU_FT_T, iNumbersize*  m_iFFTSubW *(m_iFFTSubH / 2 + 1) * sizeof(cuFloatComplex)));
 	checkCudaErrors(cudaMalloc((void **)&CuFFT, iNumbersize*m_iFFTSubW *m_iFFTSubH * sizeof(cufftReal)));
 
+	double time1 = getTickCount();
+	get_FFTAveR_kernel_all_iteration << <iNumbersize,BLOCK_SIZE_128 >> > (dR, dPXY,
+		m_iFFTSubW, m_iFFTSubW, iHeight, iWidth,
+		subsetR, subset_aveR);
+
+	get_FFTAveR_kernel_all_iteration << <iNumbersize, BLOCK_SIZE_128 >> > (dT, dPXY,
+		m_iFFTSubW, m_iFFTSubW, iHeight, iWidth,
+		subsetT, subset_aveT);
+
+	double time2 = getTickCount();
+
 	cufftHandle plan1, plan2;
 	checkCudaErrors(cufftPlan2d(&plan1, m_iFFTSubW, m_iFFTSubH, CUFFT_R2C));
 	checkCudaErrors(cufftPlan2d(&plan2, m_iFFTSubW, m_iFFTSubH, CUFFT_C2R));
+	double time3 = getTickCount();
 	//checkCudaErrors(cufftExecR2C(plan1, (cufftReal *)(test_in), (cuFloatComplex *)(test)));
 	dim3 block(iNumbersize);
 	dim3 threadnew(m_iFFTSubH, m_iFFTSubW / 2 + 1);
@@ -204,17 +240,42 @@ void FFTW_cc
 		checkCudaErrors(cufftExecR2C(plan1, (cufftReal *)(subset_aveR + i * (subsetsize)), (cufftComplex *)(CU_FT_R + i* m_iFFTSubW *(m_iFFTSubH / 2 + 1))));
 		checkCudaErrors(cufftExecR2C(plan1, (cufftReal *)(subset_aveT + i * (subsetsize)), (cufftComplex *)(CU_FT_T + i* m_iFFTSubW *(m_iFFTSubH / 2 + 1))));
 	}
+
+	double time4 = getTickCount();
+
 	conjugate << <block, threadnew >> > (CU_FT_R);
 	multiplication << <block, threadnew >> > (CU_FT_R, CU_FT_T);
+
+	double time5 = getTickCount();
 
 	for (int j = 0;j < iNumbersize;j++)
 	{
 		checkCudaErrors(cufftExecC2R(plan2, (cuFloatComplex *)CU_FT_R, (cufftReal *)(CuFFT + subsetsize)));
 	}
 
+	double time6 = getTickCount();
+	chang_coordinate << <block, thread >> > (CuFFT, m_iFFTSubW, subsetsize);
 
 	latched_position << <block, thread >> > (CuFFT, d_iU, d_iV, subsetsize);
-/*
+
+	double time7 = getTickCount();
+
+	double stime1 = (time1 - time0) / getTickFrequency();
+    double stime2 = (time2 - time1) / getTickFrequency();
+	double stime3 = (time3 - time2) / getTickFrequency();
+	double stime4 = (time4 - time3) / getTickFrequency();
+	double stime5 = (time5 - time4) / getTickFrequency();
+	double stime6 = (time6 - time5) / getTickFrequency();
+	double stime7 = (time7 - time6) / getTickFrequency();
+
+	cout << "Malloc" << stime1 << endl;
+	cout << "Malloc" << stime2 << endl;
+	cout << "Malloc" << stime3 << endl;
+	cout << "Malloc" << stime4 << endl;
+	cout << "Malloc" << stime5 << endl;
+	cout << "Malloc" << stime6 << endl;
+	cout << "Malloc" << stime6 << endl;
+
 	checkCudaErrors(cudaFree(subsetR));
 	checkCudaErrors(cudaFree(subsetT));
 	checkCudaErrors(cudaFree(subset_aveR));
@@ -222,7 +283,7 @@ void FFTW_cc
 	checkCudaErrors(cudaFree(CU_FT_R));
 	checkCudaErrors(cudaFree(CU_FT_T));
 	checkCudaErrors(cudaFree(CuFFT));
-*/
+
 
 	/*
 	checkCudaErrors(cudaMemcpy(H_subset_aveR, subset_aveR, iNumbersize *(subsetsize+1)* sizeof(float), cudaMemcpyDeviceToHost));
